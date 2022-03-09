@@ -532,7 +532,7 @@ begin
 		) where {T,S} = $RT{promote_type(T,S)}
 		
 		@eval function Base.convert(
-			::Type{<:PromiseSettledResult{T}}, 
+			::Type{<:$PromiseSettledResult{T}}, 
 			r::$RT{S}
 		) where {T,S}
 			$RT{T}(convert(T, r.value))
