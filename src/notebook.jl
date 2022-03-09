@@ -594,7 +594,7 @@ end |> await_settled isa Rejected{CapturedException}
 end |> await_settled === Resolved(1)
 
 # ╔═╡ 9aa052ef-5f60-4935-94d1-a4cbc5096d46
-let
+@skip_as_script let
 	p1 = Promise{Int64}() do res, rej
 		res(1)
 	end
@@ -610,7 +610,7 @@ let
 end
 
 # ╔═╡ 2b6e41af-c9e9-4774-a6f5-51c301705a10
-let
+@skip_as_script let
 	p1 = Promise{Int64}() do res, rej
 		rej(-1)
 	end
@@ -626,7 +626,7 @@ let
 end
 
 # ╔═╡ 1ef3378e-62ac-463b-b8c0-dfb6f46f956b
-let
+@skip_as_script let
 	p1 = Promise{Int64}() do res, rej
 		sqrt(-1)
 	end
@@ -642,7 +642,7 @@ let
 end
 
 # ╔═╡ 5869262c-40fe-4752-856d-1da536e3e11a
-let
+@skip_as_script let
 	p1 = Promise{Int64}() do res, rej
 		sqrt(-1)
 	end
@@ -940,7 +940,7 @@ end
 @test await_settled(Promises.resolve(1)) === Resolved{Int64}(1)
 
 # ╔═╡ 03006230-3654-4372-9f49-367d1689c551
-let
+@skip_as_script let
 	p = Promises.all((
 		Promises.resolve(1),
 		Promises.reject(2),
@@ -949,7 +949,7 @@ let
 end
 
 # ╔═╡ 120e3b56-c5db-43d4-b165-de77299582e0
-let
+@skip_as_script let
 	p = Promises.all((
 		Promises.delay(0.01, 1),
 		Promises.delay(0.05, 2),
@@ -958,7 +958,7 @@ let
 end
 
 # ╔═╡ 54b64da2-bce4-4b7d-bfae-394a93996cf2
-let
+@skip_as_script let
 	p = Promises.all((
 		Promises.delay(0.01, 1),
 		Promise((res,rej) -> Promises.delay(0.05, 2).then(rej)),
@@ -1055,7 +1055,7 @@ md"""
 )) === 1
 
 # ╔═╡ 5bb6467c-8116-4c8b-8182-e246d7b96ea1
-let
+@skip_as_script let
 	p = Promises.race((
 		Promises.delay(0.15, 1),
 		Promises.delay(0.01, -2).then(sqrt),
