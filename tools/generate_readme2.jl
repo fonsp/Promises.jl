@@ -117,6 +117,9 @@ md"""
 
 # ╔═╡ 3aa0f01d-7cf9-45c2-af4d-2db45098c635
 function cell_repr(cell::Pluto.Cell)::Tuple{String,MIME}
+	if Pluto.ends_with_semicolon(cell.code)
+		return "", MIME"text/plain"()
+	end
 	ws = Pluto.WorkspaceManager.get_workspace((s, nb_original))
 	Pluto.WorkspaceManager.eval_fetch_in_workspace(
 		(s, nb_original),
@@ -167,36 +170,41 @@ end
 
 # ╔═╡ 699ebe9c-ff49-4a27-952a-e72eddd4dfa8
 function cell_md_data(cell::Pluto.Cell)::String
-	output = let
-		prefix = let
-			r = cell.output.rootassignee
-			if r isa Symbol
-				"$(r) = "
+	data, mime = cell_repr(cell)
+	result = if cell.code_folded
+		let
+			prefix = let
+				r = cell.output.rootassignee
+				if r isa Symbol
+					"$(r) = "
+				else
+					""
+				end
+			end
+			
+			if mime isa MIME"text/markdown" || mime isa MIME"text/html"
+				prefix * data
 			else
-				""
+				isempty(data) ? prefix : "```\n$(prefix * data)\n```"
 			end
 		end
-		
-		data, mime = cell_repr(cell)
-		if mime isa MIME"text/markdown" || mime isa MIME"text/html"
-			prefix * data
-		else
-			isempty(data) ? prefix : "```\n$(prefix * data)\n```"
-		end
-	end
-	input = let
-		if cell.code_folded
-			""
-		else
+	else
+		if isempty(data)
 			"```julia\n$(cell.code)\n```"
+		else
+			if mime isa MIME"text/markdown" || mime isa MIME"text/html"
+				"```julia\n$(cell.code)\n```\n$(data)"
+			else
+				multiline = occursin("\n", data)
+				"```julia\n$(cell.code)\n\n#=>  $(multiline ? "\n" : "")$(data)\n```"
+			end
 		end
 	end
-	
 
-	if isempty(output) && isempty(input)
+	if isempty(result)
 		"\n<br>\n\n"
 	else
-		output * "\n" * input * "\n"
+		result * "\n"
 	end
 end
 
