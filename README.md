@@ -1,19 +1,13 @@
 # Promises.jl: *JavaScript-inspired async*
 
 
-
 You can use Promises.jl to run code in the background:
-
 
 
 ```
 username = "JuliaLang"
 ```
 
-
-```
-download_result = Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_O81EGT" )
-```
 ```julia
 download_result = Promise((resolve, reject) -> begin
 
@@ -23,28 +17,26 @@ download_result = Promise((resolve, reject) -> begin
 	resolve(filename)
 	
 end)
+
+#=>  Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_Ee7otw" )
 ```
 
 The result is a *pending promise*: it might still running in the background! 
 
 
-
-```
-Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_O81EGT" )
-```
 ```julia
 download_result
+
+#=>  Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_Ee7otw" )
 ```
 
 You can use `@await` to wait for it to finish, and get its value:
 
 
-
-```
-"/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_O81EGT"
-```
 ```julia
 @await download_result
+
+#=>  "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_Ee7otw"
 ```
 
 <br>
@@ -55,8 +47,14 @@ You can use `@await` to wait for it to finish, and get its value:
 One cool feature of promises is **chaining**! Every promise has a `then` function, which can be used to add a new transformation to the chain, returning a new `Promise`.
 
 
+```julia
+download_result.then(
+	filename -> read(filename, String)
+).then(
+	str -> JSON.parse(str)
+)
 
-```
+#=>  
 Promise{Any}( <resolved>: Dict{String, Any} with 32 entries:
   "followers"         => 0
   "created_at"        => "2011-04-21T06:33:51Z"
@@ -72,13 +70,6 @@ Promise{Any}( <resolved>: Dict{String, Any} with 32 entries:
   "subscriptions_url" => "https://api.github.com/users/JuliaLang/subscriptions"
   "id"                => 743164
   ⋮                   => ⋮ )
-```
-```julia
-download_result.then(
-	filename -> read(filename, String)
-).then(
-	str -> JSON.parse(str)
-)
 ```
 
 <br>
@@ -104,29 +95,29 @@ end)
 If you `@await` a promise that has rejected, the rejected value will be rethrown as an error:
 
 
-
-```
-oopsie_result = Promise{Any}( <rejected>: "oops!" )
-```
 ```julia
 oopsie_result = Promise((res, rej) -> rej("oops!"))
+
+#=>  Promise{Any}( <rejected>: "oops!" )
 ```
 
-```
+```julia
+@await oopsie_result
+
+#=>  
 "oops!"
 Stacktrace:
  [1] fetch(p::Main.workspace#3.Promise{Any})
    @ Main.workspace#3 ~/Documents/Promises.jl/src/notebook.jl#==#49a8beb7-6a97-4c46-872e-e89822108f39:78
 ```
-```julia
-@await oopsie_result
-```
 
 In addition, when an exception occurs inside a Promise body, the Promise will reject, with the error message as rejected value:
 
 
+```julia
+Promise((res, rej) -> res(sqrt(-1)))
 
-```
+#=>  
 Promise{Any}( <rejected>: 
 DomainError with -1.0:
 sqrt will only return a complex result if called with a complex argument. Try sqrt(Complex(x)).
@@ -145,9 +136,6 @@ Stacktrace:
    @ Main.workspace#3 ./task.jl:423
  )
 ```
-```julia
-Promise((res, rej) -> res(sqrt(-1)))
-```
 
 <br>
 
@@ -159,23 +147,19 @@ There are two special things about rejected values in chains:
 1. The `.then` function of a rejected Promise will *immediately reject*, passing the value along.
 
 
-
-```
-Promise{Any}( <rejected>: "oops!" )
-```
 ```julia
 Promise((res, rej) -> rej("oops!")).then(x -> x + 10).then(x -> x / 100)
+
+#=>  Promise{Any}( <rejected>: "oops!" )
 ```
 
 2. The `.catch` is the opposite of `.then`: it is used to handle rejected values.
 
 
-
-```
-Promise{Any}( <resolved>: 123 )
-```
 ```julia
 Promise((res, rej) -> rej("oops!")).then(x -> x + 10).catch(x -> 123)
+
+#=>  Promise{Any}( <resolved>: 123 )
 ```
 
 Here is a little table:
@@ -186,7 +170,6 @@ Here is a little table:
 | On a **rejected** Promise: | *Skipped* |      Runs |
 
 
-
 <br>
 
 
@@ -195,19 +178,19 @@ Here is a little table:
 Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For example, `Promise{String}` is guaranteed to resolve to a `String`.
 
 
-
-```
-Promise{String}( <resolved>: "asdf" )
-```
 ```julia
 Promise{String}((res,rej) -> res("asdf"))
+
+#=>  Promise{String}( <resolved>: "asdf" )
 ```
 
 Trying to resolve to another type will reject the Promise:
 
 
+```julia
+Promise{String}((res,rej) -> res(12341234))
 
-```
+#=>  
 Promise{String}( <rejected>: 
 ArgumentError: Can only resolve with values of type String.
 Stacktrace:
@@ -221,19 +204,14 @@ Stacktrace:
    @ Main.workspace#3 ./task.jl:423
  )
 ```
-```julia
-Promise{String}((res,rej) -> res(12341234))
-```
 
 This information is available to the Julia compiler, which means that it can do smart stuff!
 
 
-
-```
-String
-```
 ```julia
 Core.Compiler.return_type(fetch, (Promise{String},))
+
+#=>  String
 ```
 
 
