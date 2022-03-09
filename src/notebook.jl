@@ -1173,8 +1173,8 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╔═╡ Cell order:
 # ╟─da12a2c8-a631-4da8-be4e-87cc1e1f124c
 # ╟─f0567e34-6fb8-4509-80e7-532e0464f1bd
-# ╟─1cf696fd-6fa4-4e93-8132-63d89d902f95
 # ╠═7aef0b5c-dd09-47d3-a08f-81cce84d7ca6
+# ╟─1cf696fd-6fa4-4e93-8132-63d89d902f95
 # ╟─7e24cd7d-6f1c-47e2-b0a3-d8f81a4e7167
 # ╠═d22278fd-33cb-4dad-ad5f-d6d067c33403
 # ╟─82f259ca-0e35-4278-ac46-aed2fdb87857

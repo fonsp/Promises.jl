@@ -4,10 +4,6 @@
 You can use Promises.jl to run code in the background:
 
 
-```
-username = "JuliaLang"
-```
-
 ```julia
 download_result = Promise((resolve, reject) -> begin
 
@@ -18,7 +14,11 @@ download_result = Promise((resolve, reject) -> begin
 	
 end)
 
-#=>  Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_Ee7otw" )
+#=>  Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_VNrh2x" )
+```
+
+```
+username = "JuliaLang"
 ```
 
 The result is a *pending promise*: it might still running in the background! 
@@ -27,7 +27,7 @@ The result is a *pending promise*: it might still running in the background!
 ```julia
 download_result
 
-#=>  Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_Ee7otw" )
+#=>  Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_VNrh2x" )
 ```
 
 You can use `@await` to wait for it to finish, and get its value:
@@ -36,7 +36,7 @@ You can use `@await` to wait for it to finish, and get its value:
 ```julia
 @await download_result
 
-#=>  "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_Ee7otw"
+#=>  "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_VNrh2x"
 ```
 
 <br>
