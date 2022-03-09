@@ -14,7 +14,7 @@ download_result = Promise((resolve, reject) -> begin
 	
 end)
 
-#=>  Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_VNrh2x" )
+#=>  Promise{Any}( <pending> )
 ```
 
 ```
@@ -27,7 +27,7 @@ The result is a *pending promise*: it might still running in the background!
 ```julia
 download_result
 
-#=>  Promise{Any}( <resolved>: "/var/folders/v_/fhpj9jn151d4p9c2fdw2gv780000gn/T/jl_VNrh2x" )
+#=>  Promise{Any}( <pending> )
 ```
 
 You can use `@await` to wait for it to finish, and get its value:
