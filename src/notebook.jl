@@ -83,49 +83,9 @@ md"""
 You can use `@await` to wait for it to finish, and get its value:
 """
 
-# ╔═╡ 8a1a621d-b94c-45ee-87b9-6ac2faa3f877
-md"""
-$(html"<br>")
-## Chaining with `then`
-
-One cool feature of promises is **chaining**! Every promise has a `then` function, which can be used to add a new transformation to the chain, returning a new `Promise`.
-"""
-
-# ╔═╡ ab37c026-963b-46d2-bc51-56e36eb3b06b
-md"""
-$(html"<br>")
-## Error handling: `reject` and `.catch`
-
-A promise can finish in two ways: it can **resolve** or it can **reject**. This corresponds to the two functions in the constructor, `resolve` and `reject`:
-
-```julia
-Promise((resolve, reject) -> begin
-
-	if condition
-		# Resolve the promise:
-		resolve("Success!")
-	else
-		# Reject the promise
-		reject("Something went wrong...")
-	end
-end)
-```
-
-If you `@await` a promise that has rejected, the rejected value will be rethrown as an error:
-"""
-
 # ╔═╡ e7f81212-e7f5-4133-8bfe-a4997c7d1bbb
 md"""
 In addition, when an exception occurs inside a Promise body, the Promise will reject, with the error message as rejected value:
-"""
-
-# ╔═╡ f14c4a43-2f2f-4390-ad4d-940b1926cfb3
-md"""
-$(html"<br>")
-### Chaining errors with `.catch`
-
-There are two special things about rejected values in chains:
-1. The `.then` function of a rejected Promise will *immediately reject*, passing the value along. 
 """
 
 # ╔═╡ 038949f4-3f99-496e-a3c7-f980f2fa92d2
@@ -141,14 +101,6 @@ Here is a little table:
 | --- | --- | --- |
 | On a **resolved** Promise: | Runs | *Skipped* |
 | On a **rejected** Promise: | *Skipped* | Runs |
-"""
-
-# ╔═╡ 34d6da04-daa8-484b-bb30-2bf2ee55da9d
-md"""
-$(html"<br>")
-### `Promise{T}` is a parametric type
-
-Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For example, `Promise{String}` is guaranteed to resolve to a `String`.
 """
 
 # ╔═╡ ae4e308e-83be-4e0b-a0a4-96677dcffa22
@@ -1155,6 +1107,68 @@ pany3 = Promises.any(Set([
 # ╔═╡ b0e0fdf9-7535-45b0-ac85-2c9fdaa28677
 @test fetch(pany3) ∈ 1:3
 
+# ╔═╡ aa46c0ef-ab6e-4eba-86c9-e090320ed3f0
+md"""
+# Appendix
+"""
+
+# ╔═╡ 0464056e-9d08-415c-9a77-fcd4676b2167
+const br = begin
+	struct BR end
+	Base.show(io::IO, ::MIME"text/html", b::BR) = write(io, "<br>")
+	Base.show(io::IO, ::MIME"text/markdown", b::BR) = write(io, "<br>")
+	Base.show(io::IO, ::MIME"text/plain", b::BR) = write(io, "<br>\n")
+	BR()
+end
+
+# ╔═╡ 8a1a621d-b94c-45ee-87b9-6ac2faa3f877
+md"""
+$(br)
+## Chaining with `then`
+
+One cool feature of promises is **chaining**! Every promise has a `then` function, which can be used to add a new transformation to the chain, returning a new `Promise`.
+"""
+
+# ╔═╡ ab37c026-963b-46d2-bc51-56e36eb3b06b
+md"""
+$(br)
+## Error handling: `reject` and `.catch`
+
+A promise can finish in two ways: it can **resolve** or it can **reject**. This corresponds to the two functions in the constructor, `resolve` and `reject`:
+
+```julia
+Promise((resolve, reject) -> begin
+
+	if condition
+		# Resolve the promise:
+		resolve("Success!")
+	else
+		# Reject the promise
+		reject("Something went wrong...")
+	end
+end)
+```
+
+If you `@await` a promise that has rejected, the rejected value will be rethrown as an error:
+"""
+
+# ╔═╡ f14c4a43-2f2f-4390-ad4d-940b1926cfb3
+md"""
+$(br)
+### Chaining errors with `.catch`
+
+There are two special things about rejected values in chains:
+1. The `.then` function of a rejected Promise will *immediately reject*, passing the value along. 
+"""
+
+# ╔═╡ 34d6da04-daa8-484b-bb30-2bf2ee55da9d
+md"""
+$(br)
+### `Promise{T}` is a parametric type
+
+Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For example, `Promise{String}` is guaranteed to resolve to a `String`.
+"""
+
 # ╔═╡ Cell order:
 # ╟─da12a2c8-a631-4da8-be4e-87cc1e1f124c
 # ╟─f0567e34-6fb8-4509-80e7-532e0464f1bd
@@ -1184,7 +1198,7 @@ pany3 = Promises.any(Set([
 # ╠═f0b73769-dea5-4dfa-8a39-ebf6584abbf5
 # ╟─580d9608-fb50-4845-b3b2-4195cdb41d67
 # ╟─530e9bf7-bd09-4978-893a-c945ca15e508
-# ╠═cbc47c58-c2d9-40da-a31f-5545fb470859
+# ╟─cbc47c58-c2d9-40da-a31f-5545fb470859
 # ╟─49a8beb7-6a97-4c46-872e-e89822108f39
 # ╟─627b5eac-9cd9-42f4-a7bf-6b7e5b09fd33
 # ╟─8e13e697-e29a-473a-ac11-30e0199be5bb
@@ -1192,8 +1206,8 @@ pany3 = Promises.any(Set([
 # ╟─c4158166-b5ed-46aa-93c5-e95c77c57c6c
 # ╟─4beec0e9-4c1e-4b25-9651-e00c798ed823
 # ╟─1657bdf9-870c-4b7b-a5c4-57b53a3e1b13
-# ╠═f0c68f85-a55d-4823-a699-ce064af29ff4
-# ╠═6233ed1e-af35-47c6-8645-3906377b029c
+# ╟─f0c68f85-a55d-4823-a699-ce064af29ff4
+# ╟─6233ed1e-af35-47c6-8645-3906377b029c
 # ╟─8ac00844-24e5-416d-aa31-28242e4ee6a3
 # ╟─b9368cf7-cbcd-4b54-9390-78e8c88f064c
 # ╟─cb47c8c9-2872-4e35-9939-f953319e1acb
@@ -1297,3 +1311,5 @@ pany3 = Promises.any(Set([
 # ╟─490ff94f-07e5-435e-8269-bdc2c917bce0
 # ╟─faca7d88-bcb8-43e3-9cce-20a65061b8d6
 # ╟─b0e0fdf9-7535-45b0-ac85-2c9fdaa28677
+# ╟─aa46c0ef-ab6e-4eba-86c9-e090320ed3f0
+# ╠═0464056e-9d08-415c-9a77-fcd4676b2167
