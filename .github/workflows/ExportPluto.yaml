@@ -35,8 +35,7 @@ jobs:
               run: julia -e 'using Pkg;
                   Pkg.activate(mktempdir());
                   Pkg.add([
-                    Pkg.PackageSpec(name="PlutoSliderServer", version="0.2.6"),
-                    Pkg.PackageSpec(name="Pluto", version="0.17.0"),
+                    Pkg.PackageSpec(name="PlutoSliderServer", version="0.3.7-0.3"),
                   ]);
 
                   import PlutoSliderServer;

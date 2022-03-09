@@ -17,6 +17,7 @@ begin
 	
 	copy!(LOAD_PATH, ["@", PROJECT_ROOT])
 	Pkg.activate(new_env)
+	Pkg.instantiate()
 
 	# development dependencies
 	import Downloads
