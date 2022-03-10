@@ -126,19 +126,22 @@ md"""
 begin
 	Base.@kwdef struct Promise{T}
 		resolved_val::Ref{Union{Nothing,Some{T}}}=Ref{Union{Nothing,Some{T}}}(nothing)
-		rejected_val::Ref{Union{Nothing,Some}}=Ref{Union{Nothing,Some}}(nothing)
+		rejected_val::Ref{Union{Nothing,Some{Any}}}=Ref{Union{Nothing,Some{Any}}}(nothing)
 		done::Channel{Nothing}=Channel{Nothing}(1)
 	end
 	
 	function Promise{T}(f::Function) where T
 		p = Promise{T}()
-		@async begin
+		begin
 			function resolve(val=nothing)
 				if !isready(p.done)
-					if val isa T
+					if val isa Promise
+						val.then(resolve)
+						return val
+					elseif val isa T
 						p.resolved_val[] = Some{T}(val)
 					else
-						p.rejected_val[] = Some(CapturedException(
+						p.rejected_val[] = Some{Any}(CapturedException(
 							ArgumentError("Can only resolve with values of type $T."),
 							stacktrace(backtrace())
 						))
@@ -149,13 +152,16 @@ begin
 			end
 			function reject(val=nothing)
 				if !isready(p.done)
-					p.rejected_val[] = Some(val)
+					p.rejected_val[] = Some{Any}(val)
 					put!(p.done, nothing)
 				end
 				val
 			end
 			try
-				f(resolve, reject)
+				t = f(resolve, reject)
+				# if t isa Task
+				# 	wait(t)
+				# end
 			catch e
 				reject(CapturedException(e, catch_backtrace()))
 			end
@@ -196,9 +202,9 @@ begin
 
 	
 	function Base.fetch(p::Promise{T})::T where T
-		fetch(p.done)
-		if p.resolved_val[] !== nothing
-			something(p.resolved_val[])
+		isready(p.done) || wait(p.done)
+		if (rv = p.resolved_val[]) !== nothing
+			something(rv)
 		else
 			throw(something(p.rejected_val[]))
 		end
@@ -206,32 +212,78 @@ begin
 
 	
 	function Base.wait(p::Promise)
-		fetch(p.done)
+		isready(p.done) || wait(p.done)
 		if p.rejected_val[] !== nothing
 			throw(something(p.rejected_val[]))
 		end
 		nothing
 	end
+
+	function done_channel()
+		c = Channel{Nothing}(1)
+		put!(c, nothing)
+		c
+	end
+
+	promise_resolved(p::Promise) = p
+	promise_resolved(x::T) where T = 
+		Promise{T}(
+			resolved_val=Ref{Union{Nothing,Some{T}}}(Some{T}(x)),
+			done=done_channel(),
+		)
+	promise_rejected(x) = 
+		Promise{Any}(
+			rejected_val=Ref{Union{Nothing,Some{Any}}}(Some{Any}(x)),
+			done=done_channel(),
+		)
+
+	# promise_value_recursive(x) = x
+	# promise_value_recursive(p::Promise) = 
+
+	promise_eltype_recursive(T::Type) = 
+		(T <: Promise) ? promise_eltype_recursive(eltype(T)) : T
 	
-	function Base.getproperty(p::Promise, name::Symbol)
+	function Base.getproperty(p::Promise{T1}, name::Symbol) where T1
 		if name === :then
 			function(f::Function)
-				T = Core.Compiler.return_type(f, (eltype(p),))
-				Promise{T}() do resolve, reject
-					wait(p.done)
+				if isready(p.done)
 					if isresolved(p)
-						resolve(f(something(p.resolved_val[])))
+						try
+							r = f(something(p.resolved_val[]))
+							promise_resolved(r)
+						catch e
+							promise_rejected(CapturedException(e, catch_backtrace()))
+						end
 					else
-						reject(something(p.rejected_val[]))
+						p
+					end
+				else
+					T2 = Core.Compiler.return_type(f, (T1,))
+					T3 = promise_eltype_recursive(T2)
+					
+					Promise{T3}() do resolve, reject
+						@async begin
+							wait(p.done)
+							rv = p.resolved_val[]
+							if rv !== nothing
+								try
+									resolve(f(something(rv)))
+								catch e
+									reject(CapturedException(e, catch_backtrace()))
+								end
+							else
+								reject(something(p.rejected_val[]))
+							end
+						end
 					end
 				end
 			end
 		elseif name === :catch
 			function(f::Function)
-				T = Core.Compiler.return_type(f, (Any,))
+				T2 = Core.Compiler.return_type(f, (Any,))
 				
-				Promise{Union{T,eltype(p)}}() do resolve, reject
-					wait(p.done)
+				Promise{Union{T1,T2}}() do resolve, reject
+					isready(p.done) || wait(p.done)
 					if isresolved(p)
 						resolve(something(p.resolved_val[]))
 					else
@@ -383,20 +435,20 @@ md"""
 
 
 # ╔═╡ 40c9f96a-41e9-496a-b174-490b72927626
-let
-	c = Channel(1)
-	p = Promise((r,_) -> r(take!(c)))
-	sleep(.1)
-	@assert !isready(p)
-	xs = []
-	ps = map(1:20) do i
-		p.then(v -> push!(xs, i))
-	end
-	put!(c, 123)
-	wait(p)
-	wait.(ps)
-	@test xs == 1:20
-end
+# let
+# 	c = Channel(1)
+# 	p = Promise((r,_) -> r(take!(c)))
+# 	sleep(.1)
+# 	@assert !isready(p)
+# 	xs = []
+# 	ps = map(1:20) do i
+# 		p.then(v -> push!(xs, i))
+# 	end
+# 	put!(c, 123)
+# 	wait(p)
+# 	wait.(ps)
+# 	@test xs == 1:20
+# end
 
 # ╔═╡ 3f97f5e7-208a-44dc-9726-1923fd8c824b
 
@@ -423,7 +475,7 @@ end
 
 # ╔═╡ 8ac00844-24e5-416d-aa31-28242e4ee6a3
 @testawait nothing === Promise() do res, rej
-	sleep(1)
+	sleep(.05)
 	sqrt(-1)
 	res(5)
 end.then(x -> x* 10).catch(e -> nothing)
@@ -455,17 +507,62 @@ Promise((res,rej) -> res(-50)).then(sqrt).catch(e -> 0)
 	seconds=3
 )
 
+# ╔═╡ 74896c89-d332-4f99-aeda-d429fa4ece2e
+let
+	c = Channel(1)
+	put!(c, 1)
+	isready(c)
+	# @benchmark isready($c) || wait($c)
+end
+
 # ╔═╡ 287f91b6-a602-457a-b32b-e0c22f15d514
 @benchmark(
 	fetch(Promise((res,rej) -> res(50)).then(sqrt).catch(e -> 0).then(sqrt)),
 	seconds=3
 )
 
-# ╔═╡ 371cede0-6f01-496a-8059-e110dbfc8d05
+# ╔═╡ fb11d74a-d13c-4459-a4b5-dbc23174dfd4
 @benchmark(
-	sqrt(sqrt(50)),
+	fetch(Promise((res,rej) -> res(50)).then(sqrt).then(sqrt)),
 	seconds=3
 )
+
+# ╔═╡ ef2a034d-5e33-46c2-a627-0721170b5b34
+@benchmark(
+	fetch(Promise{Int64}((res,rej) -> res(50)).then(sqrt).then(sqrt)),
+	seconds=3
+)
+
+# ╔═╡ 788a27b3-aab0-42cc-8197-3cc5b3b875d1
+# @benchmark(
+# 	let
+# 		c = Channel(1)
+# 		for x in 1:100
+# 			t = @async begin
+# 				take!(c)
+# 			end
+# 			put!(c, nothing)
+# 		end
+# 	end,
+# 	seconds=3
+# )
+
+# ╔═╡ 836bf28f-caa5-44e0-ac8c-44a722a9063b
+# @benchmark(
+# 	let
+# 		a = fetch(@async 50)
+# 		for x in 1:100
+# 			a = fetch(@async sqrt(a))
+# 		end
+# 	end,
+# 	seconds=3
+# )
+
+# ╔═╡ 371cede0-6f01-496a-8059-e110dbfc8d05
+# @benchmark(
+# 	sqrt(sqrt(50)),
+# 	seconds=3
+# )
 
 # ╔═╡ 06a3eb82-0ffd-4c89-8161-d0f385c2a32e
 md"""
@@ -486,6 +583,13 @@ end
 # ╔═╡ a854b9e6-1a82-401e-90d5-f05ffaadae61
 macro async_promise(expr)
 	# ..... not sure yet!! TODO
+	quote
+		Promise((res, rej) -> try
+			res($(esc(expr)))
+		catch e
+			rej(CapturedException(e,catch_backtrace()))
+		end)
+	end
 end
 
 # ╔═╡ eb4e90d9-0e21-4f06-842d-4260f074f097
@@ -828,7 +932,7 @@ function promise_any(ps)
 	T = union_type(ps)
 	Promise{T}() do res, rej
 		for p in ps
-			p.then(res)
+			@async p.then(res)
 		end
 		
 		for p in ps
@@ -857,8 +961,8 @@ function promise_race(ps)
 	T = union_type(ps)
 	Promise{T}() do res, rej
 		for p in ps
-			p.then(res)
-			p.catch(rej)
+			@async p.then(res)
+			@async p.catch(rej)
 			
 			# (optimization)
 			if isready(p.done)
@@ -870,19 +974,17 @@ end
 
 # ╔═╡ 627b5eac-9cd9-42f4-a7bf-6b7e5b09fd33
 const Promises = (;
-	resolve = function(val::T) where T
-		Promise{T}((res,rej) -> res(val))
-	end,
-	reject = function(val::T) where T
-		Promise{T}((res,rej) -> rej(val))
-	end,
+	resolve = promise_resolved,
+	reject = promise_rejected,
 	all = promise_all,
 	any = promise_any,
 	race = promise_race,
 	delay = function(delay::Real, val::T=nothing) where T
-		Promise{T}() do res,rej
-			sleep(delay)
-			res(val)
+		Promise{T}() do res, rej
+			@async begin
+				sleep(delay)
+				res(val)
+			end
 		end
 	end,
 )
@@ -1057,12 +1159,15 @@ md"""
 # ╔═╡ 5bb6467c-8116-4c8b-8182-e246d7b96ea1
 @skip_as_script let
 	p = Promises.race((
-		Promises.delay(0.15, 1),
+		Promises.delay(0.5, 1),
 		Promises.delay(0.01, -2).then(sqrt),
 	))
 
 	@test await_settled(p) isa Rejected{CapturedException}
 end
+
+# ╔═╡ ec30ab9b-d573-449d-9e0e-18d8c75c694f
+Promises.delay(0.5, -2)
 
 # ╔═╡ 53c28e9b-d80e-4c58-ad97-16f28fee80f9
 md"""
@@ -1200,8 +1305,8 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╟─580d9608-fb50-4845-b3b2-4195cdb41d67
 # ╟─530e9bf7-bd09-4978-893a-c945ca15e508
 # ╟─cbc47c58-c2d9-40da-a31f-5545fb470859
-# ╟─49a8beb7-6a97-4c46-872e-e89822108f39
-# ╟─627b5eac-9cd9-42f4-a7bf-6b7e5b09fd33
+# ╠═49a8beb7-6a97-4c46-872e-e89822108f39
+# ╠═627b5eac-9cd9-42f4-a7bf-6b7e5b09fd33
 # ╟─8e13e697-e29a-473a-ac11-30e0199be5bb
 # ╟─649be363-e5dd-4c76-ae82-83e28e62b4f9
 # ╟─c4158166-b5ed-46aa-93c5-e95c77c57c6c
@@ -1209,7 +1314,7 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╟─1657bdf9-870c-4b7b-a5c4-57b53a3e1b13
 # ╟─f0c68f85-a55d-4823-a699-ce064af29ff4
 # ╟─6233ed1e-af35-47c6-8645-3906377b029c
-# ╟─8ac00844-24e5-416d-aa31-28242e4ee6a3
+# ╠═8ac00844-24e5-416d-aa31-28242e4ee6a3
 # ╟─b9368cf7-cbcd-4b54-9390-78e8c88f064c
 # ╟─cb47c8c9-2872-4e35-9939-f953319e1acb
 # ╟─6a84cdd0-f57e-4535-bc16-24bc40018033
@@ -1225,9 +1330,9 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╟─3cb7964a-45bb-471e-9fca-c390e06b0fee
 # ╟─9e27473e-91b3-4261-8033-5295d4a94426
 # ╟─5d943937-2271-431c-8fc0-4f963aa4dda0
-# ╟─40c9f96a-41e9-496a-b174-490b72927626
+# ╠═40c9f96a-41e9-496a-b174-490b72927626
 # ╟─3f97f5e7-208a-44dc-9726-1923fd8c824b
-# ╟─17c7f0ab-169c-4798-8f6d-afe950d10715
+# ╠═17c7f0ab-169c-4798-8f6d-afe950d10715
 # ╟─f0b70a1f-48d1-4593-8e36-092aebb4c92f
 # ╟─c68ab4c1-6384-4802-a9a6-697a63d3488e
 # ╟─9ee2e123-7a24-46b2-becf-2d011abdcb19
@@ -1239,7 +1344,12 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╠═55fb60c1-b48b-4f0a-a24c-dcc2d7f0af4b
 # ╠═10bfce78-782d-49a1-9fc8-6b2ac5d16831
 # ╠═5bb55103-bd26-4f30-bed6-026b003617b7
+# ╠═74896c89-d332-4f99-aeda-d429fa4ece2e
 # ╠═287f91b6-a602-457a-b32b-e0c22f15d514
+# ╠═fb11d74a-d13c-4459-a4b5-dbc23174dfd4
+# ╠═ef2a034d-5e33-46c2-a627-0721170b5b34
+# ╠═788a27b3-aab0-42cc-8197-3cc5b3b875d1
+# ╠═836bf28f-caa5-44e0-ac8c-44a722a9063b
 # ╠═371cede0-6f01-496a-8059-e110dbfc8d05
 # ╟─06a3eb82-0ffd-4c89-8161-d0f385c2a32e
 # ╠═939c6e86-ded8-4b15-890b-80207e8d692a
@@ -1285,8 +1395,8 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╟─a5c33dca-d24d-41fe-9cf8-b0435fc5cf3f
 # ╟─7f2b582f-2ce9-4240-bf6b-cd2e5a139d03
 # ╟─4383a75f-cd86-487f-a2a1-6817b5e5bdaa
-# ╟─a881d3ee-8e26-4aba-b694-5a4a429a941c
-# ╟─09fc563e-3339-4e63-89e6-4f523d201d99
+# ╠═a881d3ee-8e26-4aba-b694-5a4a429a941c
+# ╠═09fc563e-3339-4e63-89e6-4f523d201d99
 # ╟─fec7b7b4-d483-4f92-ac60-3a61edba1075
 # ╟─5da62d01-75af-487c-9727-8c924fbfe26b
 # ╟─8d57a295-0bd3-4a68-acbc-4069b61eb8ed
@@ -1299,9 +1409,10 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╟─08f280ed-e949-4491-8ccc-473c519291dc
 # ╟─5bafaea8-4b70-4ad6-98df-e2ea6f6e078e
 # ╟─0a61ae15-f011-49c9-8f3c-aaa01369490f
-# ╟─298da21f-1719-4635-b10a-7a879cd7fd62
+# ╠═298da21f-1719-4635-b10a-7a879cd7fd62
 # ╟─93a6be91-31af-43a7-a7b3-1e509acac2e9
-# ╟─5bb6467c-8116-4c8b-8182-e246d7b96ea1
+# ╠═5bb6467c-8116-4c8b-8182-e246d7b96ea1
+# ╠═ec30ab9b-d573-449d-9e0e-18d8c75c694f
 # ╟─53c28e9b-d80e-4c58-ad97-16f28fee80f9
 # ╠═f9bde599-294b-48fc-b9fc-acd32dfcdf2a
 # ╠═8c12ef4b-b5e0-4931-8717-821705567e52
