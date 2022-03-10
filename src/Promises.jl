@@ -15,9 +15,11 @@ const Resolved = 💛.Resolved
 const Rejected = 💛.Rejected
 const PromiseSettledResult = 💛.PromiseSettledResult
 const var"@await" = 💛.var"@await"
+const var"@async_promise" = 💛.var"@async_promise"
 
 export Promise,
-    @await
+    @await,
+    @async_promise
 
 
 end
