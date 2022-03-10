@@ -64,11 +64,18 @@ end
 md"""
 # Promises.jl: *JavaScript-inspired async*
 
+> #### Summary:
+> 
+> A **`Promise{T}`** is a container for a value **that will arrive in the future**. 
+> 
+> You can **await** Promises, and you can **chain** processing steps with `.then` and `.catch`, each producing a new `Promise`.
+
+
 """
 
 # ╔═╡ f0567e34-6fb8-4509-80e7-532e0464f1bd
 md"""
-You can use Promises.jl to run code in the background:
+Let's look at an example, using Promises.jl to download data in the background:
 """
 
 # ╔═╡ 1cf696fd-6fa4-4e93-8132-63d89d902f95
@@ -84,9 +91,19 @@ md"""
 You can use `@await` to wait for it to finish, and get its value:
 """
 
-# ╔═╡ e7f81212-e7f5-4133-8bfe-a4997c7d1bbb
+# ╔═╡ d3b5ee70-81d2-425d-9fb0-4c9a42ea4674
 md"""
-In addition, when an exception occurs inside a Promise body, the Promise will reject, with the error message as rejected value:
+Since the original Promise `download_result` was asynchronous, this newly created `Promise` is also asynchronous! By chaining the operations `read` and `JSON.parse`, you are "queing" them to run in the background.
+"""
+
+# ╔═╡ 2614a13c-3454-444f-86ac-fedd6cb58c3c
+md"""
+If you `@await` a Promise that has rejected, the rejected value will be rethrown as an error:
+"""
+
+# ╔═╡ 1d66a02b-5c9c-4c3a-bfbc-b11fc7196c3a
+md"""
+(A shorthand function is available to create promises that immediately reject or resolve, like we did above: `Promises.resolve(value)` and `Promises.reject(value)`.)
 """
 
 # ╔═╡ 038949f4-3f99-496e-a3c7-f980f2fa92d2
@@ -104,14 +121,21 @@ Here is a little table:
 | On a **rejected** Promise: | *Skipped* | Runs |
 """
 
+# ╔═╡ 74cdad42-7f54-4da3-befe-a67c969217ae
+md"""
+This information is available to the Julia compiler, which means that it can do smart stuff!
+"""
+
 # ╔═╡ ae4e308e-83be-4e0b-a0a4-96677dcffa22
 md"""
 Trying to resolve to another type will reject the Promise:
 """
 
-# ╔═╡ 74cdad42-7f54-4da3-befe-a67c969217ae
+# ╔═╡ bcaaf4f0-cb32-4136-aaec-3259ef6b383d
 md"""
-This information is available to the Julia compiler, which means that it can do smart stuff!
+#### Automatic types
+
+Julia is smart, and it can automatically determine the type of chained Promises using static analysis!
 """
 
 # ╔═╡ 580d9608-fb50-4845-b3b2-4195cdb41d67
@@ -121,6 +145,37 @@ This information is available to the Julia compiler, which means that it can do 
 md"""
 # Implementation
 """
+
+# ╔═╡ bc985d7d-0e31-4754-84a9-67f653248b7c
+cleanup_backtrace(x) = x
+
+# ╔═╡ 3e65077d-8c4e-4531-a6fa-d177fd7ed1ea
+function cleanup_backtrace(val::CapturedException)
+	try
+		stack = [s for (s, _) in val.processed_bt]
+	
+		pluto_stuff_index = findfirst(val.processed_bt) do (f,_)
+			occursin("function_wrapped_cell", String(f.func))
+		end
+		
+		
+		stack = if pluto_stuff_index === nothing
+			val.processed_bt
+		else
+			val.processed_bt[begin:pluto_stuff_index-1]
+		end
+	
+		# here = replace(@__FILE__, r"#==#.*" => "")
+		# stack_really = filter(stack) do (f,_)
+		# 	!occursin(here, String(f.file))
+		# end
+		stack_really = stack
+		
+		CapturedException(val.ex, stack_really)
+	catch e
+		val
+	end
+end
 
 # ╔═╡ 49a8beb7-6a97-4c46-872e-e89822108f39
 begin
@@ -136,14 +191,16 @@ begin
 			function resolve(val=nothing)
 				if !isready(p.done)
 					if val isa Promise
+						# TODO: this leaks memory maybe because one will keep hanging?
 						val.then(resolve)
+						val.catch(reject)
 						return val
 					elseif val isa T
 						p.resolved_val[] = Some{T}(val)
 					else
-						p.rejected_val[] = Some{Any}(CapturedException(
+						p.rejected_val[] = Some{Any}(cleanup_backtrace(CapturedException(
 							ArgumentError("Can only resolve with values of type $T."),
-							stacktrace(backtrace())
+							backtrace())
 						))
 					end
 					put!(p.done, nothing)
@@ -163,7 +220,7 @@ begin
 				# 	wait(t)
 				# end
 			catch e
-				reject(CapturedException(e, catch_backtrace()))
+				reject(cleanup_backtrace(CapturedException(e, catch_backtrace())))
 			end
 		end
 		p
@@ -178,6 +235,73 @@ begin
 	isrejected(p::Promise) = isready(p) && p.rejected_val[] !== nothing
 
 	Base.isready(p::Promise) = isready(p.done)
+
+	function promise_then(p::Promise{T1}, f::Function) where T1
+		if isready(p.done)
+			if isresolved(p)
+				try
+					r = f(something(p.resolved_val[]))
+					promise_resolved(r)
+				catch e
+					promise_rejected(cleanup_backtrace(CapturedException(e, catch_backtrace())))
+				end
+			else
+				p
+			end
+		else
+			T2 = Core.Compiler.return_type(f, (T1,))
+			T3 = promise_eltype_recursive(T2)
+			
+			Promise{T3}() do resolve, reject
+				@async begin
+					wait(p.done)
+					rv = p.resolved_val[]
+					if rv !== nothing
+						try
+							resolve(f(something(rv)))
+						catch e
+							reject(cleanup_backtrace(CapturedException(e, catch_backtrace())))
+						end
+					else
+						reject(something(p.rejected_val[]))
+					end
+				end
+			end
+		end
+	end
+	
+	function promise_catch(p::Promise{T1}, f::Function) where T1
+		T2 = Core.Compiler.return_type(f, (Any,))
+		
+		Promise{Union{T1,T2}}() do resolve, reject
+			isready(p.done) || wait(p.done)
+			if isresolved(p)
+				resolve(something(p.resolved_val[]))
+			else
+				resolve(f(something(p.rejected_val[])))
+			end
+		end
+	end
+
+	
+	function Base.fetch(p::Promise{T})::T where T
+		isready(p.done) || wait(p.done)
+		if (rv = p.resolved_val[]) !== nothing
+			something(rv)
+		else
+			throw(something(p.rejected_val[]))
+		end
+	end
+
+	
+	function Base.wait(p::Promise)
+		isready(p.done) || wait(p.done)
+		if p.rejected_val[] !== nothing
+			throw(something(p.rejected_val[]))
+		end
+		nothing
+	end
+	
 	
 	function Base.:(==)(a::Promise{T}, b::Promise{T}) where T
 		isready(a) == isready(b) &&
@@ -201,23 +325,6 @@ begin
 	end
 
 	
-	function Base.fetch(p::Promise{T})::T where T
-		isready(p.done) || wait(p.done)
-		if (rv = p.resolved_val[]) !== nothing
-			something(rv)
-		else
-			throw(something(p.rejected_val[]))
-		end
-	end
-
-	
-	function Base.wait(p::Promise)
-		isready(p.done) || wait(p.done)
-		if p.rejected_val[] !== nothing
-			throw(something(p.rejected_val[]))
-		end
-		nothing
-	end
 
 	function done_channel()
 		c = Channel{Nothing}(1)
@@ -245,52 +352,9 @@ begin
 	
 	function Base.getproperty(p::Promise{T1}, name::Symbol) where T1
 		if name === :then
-			function(f::Function)
-				if isready(p.done)
-					if isresolved(p)
-						try
-							r = f(something(p.resolved_val[]))
-							promise_resolved(r)
-						catch e
-							promise_rejected(CapturedException(e, catch_backtrace()))
-						end
-					else
-						p
-					end
-				else
-					T2 = Core.Compiler.return_type(f, (T1,))
-					T3 = promise_eltype_recursive(T2)
-					
-					Promise{T3}() do resolve, reject
-						@async begin
-							wait(p.done)
-							rv = p.resolved_val[]
-							if rv !== nothing
-								try
-									resolve(f(something(rv)))
-								catch e
-									reject(CapturedException(e, catch_backtrace()))
-								end
-							else
-								reject(something(p.rejected_val[]))
-							end
-						end
-					end
-				end
-			end
+			f -> promise_then(p, f)
 		elseif name === :catch
-			function(f::Function)
-				T2 = Core.Compiler.return_type(f, (Any,))
-				
-				Promise{Union{T1,T2}}() do resolve, reject
-					isready(p.done) || wait(p.done)
-					if isresolved(p)
-						resolve(something(p.resolved_val[]))
-					else
-						resolve(f(something(p.rejected_val[])))
-					end
-				end
-			end
+			f -> promise_catch(p, f)
 		else
 			getfield(p, name)
 		end
@@ -376,31 +440,11 @@ begin
 	""" Promise
 end
 
-# ╔═╡ 7aef0b5c-dd09-47d3-a08f-81cce84d7ca6
-@skip_as_script download_result = Promise((resolve, reject) -> begin
-
-	filename = Downloads.download("https://api.github.com/users/$(username)")
-
-	# call `resolve` with the result
-	resolve(filename)
-	
-end)
-
-# ╔═╡ d22278fd-33cb-4dad-ad5f-d6d067c33403
-@skip_as_script download_result
-
-# ╔═╡ 42c6edee-d43a-40cd-af4f-3d572a6b5e9a
-@skip_as_script download_result.then(
-	filename -> read(filename, String)
-).then(
-	str -> JSON.parse(str)
-)
+# ╔═╡ 418f24b9-a86d-45d5-bba1-5dcd188ffafa
+yay_result = Promise((resolve, reject) -> resolve("🌟 yay!"))
 
 # ╔═╡ d8aa3fed-78f0-417a-8e47-849ec62fa056
 oopsie_result = Promise((res, rej) -> rej("oops!"))
-
-# ╔═╡ 34364f4d-e257-4c22-84ee-d8786a2c377c
-Promise((res, rej) -> res(sqrt(-1)))
 
 # ╔═╡ acfae6b5-947a-4648-99ba-bcd2dd3afbca
 Promise((res, rej) -> rej("oops!")).then(x -> x + 10).then(x -> x / 100)
@@ -411,11 +455,137 @@ Promise((res, rej) -> rej("oops!")).then(x -> x + 10).catch(x -> 123)
 # ╔═╡ 959d2e3e-1ef6-4a97-a748-31b0b5ece938
 Promise{String}((res,rej) -> res("asdf"))
 
+# ╔═╡ f0b73769-dea5-4dfa-8a39-ebf6584abbf5
+Core.Compiler.return_type(fetch, (Promise{String},))
+
 # ╔═╡ 9d9179de-19b1-4f40-b816-454a8c071c3d
 Promise{String}((res,rej) -> res(12341234))
 
-# ╔═╡ f0b73769-dea5-4dfa-8a39-ebf6584abbf5
-Core.Compiler.return_type(fetch, (Promise{String},))
+# ╔═╡ db33260f-e3c9-4184-a4aa-1836e5f4201e
+typeof(
+	Promise{String}((res,rej) -> res("asdf")).then(first)
+)
+
+# ╔═╡ 06a3eb82-0ffd-4c89-8161-d0f385c2a32e
+md"""
+# `async`/`await`
+"""
+
+# ╔═╡ 939c6e86-ded8-4b15-890b-80207e8d692a
+macro await(expr)
+	:(Base.fetch($(esc(expr))))
+end
+
+# ╔═╡ 5a5f26dd-f0df-4dc7-be26-6bb23cc27fb2
+function wrap_output_type_in_promise(e)
+	if Meta.isexpr(e, :where)
+		Expr(e.head, wrap_output_type_in_promise(e.args[1]), e.args[2:end]...)
+	elseif Meta.isexpr(e, Symbol("::"), 2)
+		Expr(Symbol("::"), e.args[1], Expr(:curly, Promise, e.args[2]))
+	else
+		e
+	end
+end
+
+# ╔═╡ 09661381-baec-4e1a-8f4f-dac7aeb4ea3c
+function async_promise_core(expr)
+	Promise
+	cleanup_backtrace
+	quote
+		Promise() do res, rej
+			task = Task() do
+				try
+					value = $(esc(expr))
+					res(value)
+				catch e
+					rej(cleanup_backtrace(CapturedException(e, catch_backtrace())))
+				end
+			end
+			schedule(task)
+		end
+	end
+end
+
+# ╔═╡ 70ff0b9b-3aa2-4f3f-ab1b-b0a7072e7ffd
+function async_promise(expr)
+	if Meta.isexpr(expr, :block, 1) || 
+		(Meta.isexpr(expr, :block, 2) && expr.args[1] isa LineNumberNode)
+		
+		Expr(:block, 
+			expr.args[1:end-1]..., 
+			async_promise(expr.args[end])
+		)
+	else
+		if Meta.isexpr(expr, :(->)) || Meta.isexpr(expr, :function)
+			# TODO: we could automatically get the promise resolve type?
+			
+			if length(expr.args) == 1
+				expr
+			elseif length(expr.args) == 2
+				Expr(
+					expr.head,
+					esc(wrap_output_type_in_promise(expr.args[1])),
+					async_promise_core(expr.args[2]),
+				)
+			else
+				throw(ArgumentError("Don't know what kind of function definition this is.\n\n$(expr)"))
+			end
+		else
+			async_promise_core(expr)
+		end
+	end
+end
+
+# ╔═╡ a854b9e6-1a82-401e-90d5-f05ffaadae61
+macro async_promise(expr)
+	async_promise(expr)
+end
+
+# ╔═╡ 7aef0b5c-dd09-47d3-a08f-81cce84d7ca6
+@skip_as_script download_result = @async_promise begin
+
+	# This will download the data, 
+	#  write the result to a file, 
+	#  and return the filename.
+	Downloads.download("https://api.github.com/users/$(username)")
+end
+
+# ╔═╡ d22278fd-33cb-4dad-ad5f-d6d067c33403
+@skip_as_script download_result
+
+# ╔═╡ f9fad7ff-cf6f-43eb-83bd-efc0cb6cde65
+@skip_as_script @await download_result
+
+# ╔═╡ 42c6edee-d43a-40cd-af4f-3d572a6b5e9a
+@skip_as_script download_result.then(
+	filename -> read(filename, String)
+).then(
+	str -> JSON.parse(str)
+)
+
+# ╔═╡ 34364f4d-e257-4c22-84ee-d8786a2c377c
+@skip_as_script bad_result = download_result.then(d -> sqrt(-1))
+
+# ╔═╡ cfcbf74b-08fe-4be2-a7ac-2a0272a41922
+@skip_as_script @await bad_result
+
+# ╔═╡ 2d116910-eb94-49b0-9e51-03fc9e57aebb
+macroexpand(@__MODULE__, :(@async_promise function f(a::A, b::B)::C
+	sleep(1)
+	123
+end), recursive=false) |> Base.remove_linenums!
+
+# ╔═╡ 2f7147f0-6b4a-4364-8aab-07f8e150b720
+macroexpand(@__MODULE__, :(@async_promise (a,b) -> begin
+	sleep(1)
+	123
+end), recursive=false) |> Base.remove_linenums!
+
+# ╔═╡ 4568aa57-7440-41a0-9eba-4050ce778ebd
+macroexpand(@__MODULE__, :(@async_promise begin
+	sleep(1)
+	123
+end), recursive=false) |> Base.remove_linenums!
 
 # ╔═╡ 8e13e697-e29a-473a-ac11-30e0199be5bb
 md"""
@@ -423,6 +593,9 @@ md"""
 """
 
 # ╔═╡ b9368cf7-cbcd-4b54-9390-78e8c88f064c
+
+
+# ╔═╡ 26f26b5d-7352-421c-a20b-9ec37dfe3eb6
 
 
 # ╔═╡ a8a07647-2b61-4401-a04d-0921a6bcec76
@@ -563,34 +736,6 @@ end
 # 	sqrt(sqrt(50)),
 # 	seconds=3
 # )
-
-# ╔═╡ 06a3eb82-0ffd-4c89-8161-d0f385c2a32e
-md"""
-# `async`/`await`
-"""
-
-# ╔═╡ 939c6e86-ded8-4b15-890b-80207e8d692a
-macro await(expr)
-	:(Base.fetch($(esc(expr))))
-end
-
-# ╔═╡ f9fad7ff-cf6f-43eb-83bd-efc0cb6cde65
-@skip_as_script @await download_result
-
-# ╔═╡ 80f73d5a-ecd7-414f-b99c-e9ce4ba8bd60
-@skip_as_script @await oopsie_result
-
-# ╔═╡ a854b9e6-1a82-401e-90d5-f05ffaadae61
-macro async_promise(expr)
-	# ..... not sure yet!! TODO
-	quote
-		Promise((res, rej) -> try
-			res($(esc(expr)))
-		catch e
-			rej(CapturedException(e,catch_backtrace()))
-		end)
-	end
-end
 
 # ╔═╡ eb4e90d9-0e21-4f06-842d-4260f074f097
 md"""
@@ -1017,6 +1162,27 @@ end
 				then(sleep).
 				then(n -> n isa Nothing ? 0.2 : "what")) == 0.2
 
+# ╔═╡ 541742f3-df63-4790-b7e0-82c8a78df8c3
+@test Promise((r,_) -> r(Promises.resolve(1))) |> await_settled == Resolved(1)
+
+# ╔═╡ cd08bb7e-afc4-4105-ad6a-5444893d7196
+@test Promise(
+	(r1,_) -> r1(Promise(
+		(r2,_) -> r2(Promise(
+			(r3,_) -> r3(Promises.resolve(2))
+		))
+	))
+) |> await_settled == Resolved(2)
+
+# ╔═╡ d7fae064-38e1-4b54-81d8-3803dce5ef5a
+@test Promise((r,_) -> r(Promises.reject(1))) |> await_settled == Rejected(1)
+
+# ╔═╡ 5d7d93a7-db41-4fa0-b043-9689996bc6af
+@test Promises.resolve(Promises.resolve(1)) |> await_settled == Resolved(1)
+
+# ╔═╡ cba01f4e-6628-49cb-a41b-743cc6e89b37
+@test Promises.reject(Promises.reject(1)) |> await_settled isa Rejected{<:Promise}
+
 # ╔═╡ 17c7f0ab-169c-4798-8f6d-afe950d10715
 @test !isready(Promises.resolve(.1).then(sleep))
 
@@ -1235,15 +1401,25 @@ $(br)
 One cool feature of promises is **chaining**! Every promise has a `then` function, which can be used to add a new transformation to the chain, returning a new `Promise`.
 """
 
+# ╔═╡ 704d4278-5f7f-40bb-893e-2391a5004279
+md"""
+$(br)
+## Error handling: rejected Promises
+
+A Promise can finish in two ways: it can **✓ resolve** or it can **✗ reject**. In both cases, the `Promise{T}` will store a value, either the *resolved value* (of type `T`) or the *rejected value* (often an error message). 
+
+When an error happens inside a Promise handler, it will reject:
+"""
+
 # ╔═╡ ab37c026-963b-46d2-bc51-56e36eb3b06b
 md"""
 $(br)
-## Error handling: `reject` and `.catch`
+## The `Promise` constructor
 
-A promise can finish in two ways: it can **resolve** or it can **reject**. This corresponds to the two functions in the constructor, `resolve` and `reject`:
+Remember that a promise can finish in two ways: it can **✓ resolve** or it can **✗ reject**. When creating a Promise by hand, this corresponds to the two functions passed in by the constructor, `resolve` and `reject`:
 
 ```julia
-Promise((resolve, reject) -> begin
+Promise{T=Any}(resolve, reject) -> begin
 
 	if condition
 		# Resolve the promise:
@@ -1255,7 +1431,6 @@ Promise((resolve, reject) -> begin
 end)
 ```
 
-If you `@await` a promise that has rejected, the rejected value will be rethrown as an error:
 """
 
 # ╔═╡ f14c4a43-2f2f-4390-ad4d-940b1926cfb3
@@ -1286,11 +1461,15 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╠═f9fad7ff-cf6f-43eb-83bd-efc0cb6cde65
 # ╟─8a1a621d-b94c-45ee-87b9-6ac2faa3f877
 # ╠═42c6edee-d43a-40cd-af4f-3d572a6b5e9a
-# ╟─ab37c026-963b-46d2-bc51-56e36eb3b06b
-# ╠═d8aa3fed-78f0-417a-8e47-849ec62fa056
-# ╠═80f73d5a-ecd7-414f-b99c-e9ce4ba8bd60
-# ╟─e7f81212-e7f5-4133-8bfe-a4997c7d1bbb
+# ╟─d3b5ee70-81d2-425d-9fb0-4c9a42ea4674
+# ╟─704d4278-5f7f-40bb-893e-2391a5004279
 # ╠═34364f4d-e257-4c22-84ee-d8786a2c377c
+# ╟─2614a13c-3454-444f-86ac-fedd6cb58c3c
+# ╠═cfcbf74b-08fe-4be2-a7ac-2a0272a41922
+# ╟─ab37c026-963b-46d2-bc51-56e36eb3b06b
+# ╠═418f24b9-a86d-45d5-bba1-5dcd188ffafa
+# ╠═d8aa3fed-78f0-417a-8e47-849ec62fa056
+# ╟─1d66a02b-5c9c-4c3a-bfbc-b11fc7196c3a
 # ╟─f14c4a43-2f2f-4390-ad4d-940b1926cfb3
 # ╠═acfae6b5-947a-4648-99ba-bcd2dd3afbca
 # ╟─038949f4-3f99-496e-a3c7-f980f2fa92d2
@@ -1298,15 +1477,28 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╟─bdb0e349-b043-4a07-9dc8-1f2ea587ac2f
 # ╟─34d6da04-daa8-484b-bb30-2bf2ee55da9d
 # ╠═959d2e3e-1ef6-4a97-a748-31b0b5ece938
-# ╟─ae4e308e-83be-4e0b-a0a4-96677dcffa22
-# ╠═9d9179de-19b1-4f40-b816-454a8c071c3d
 # ╟─74cdad42-7f54-4da3-befe-a67c969217ae
 # ╠═f0b73769-dea5-4dfa-8a39-ebf6584abbf5
+# ╟─ae4e308e-83be-4e0b-a0a4-96677dcffa22
+# ╠═9d9179de-19b1-4f40-b816-454a8c071c3d
+# ╟─bcaaf4f0-cb32-4136-aaec-3259ef6b383d
+# ╠═db33260f-e3c9-4184-a4aa-1836e5f4201e
 # ╟─580d9608-fb50-4845-b3b2-4195cdb41d67
 # ╟─530e9bf7-bd09-4978-893a-c945ca15e508
 # ╟─cbc47c58-c2d9-40da-a31f-5545fb470859
 # ╠═49a8beb7-6a97-4c46-872e-e89822108f39
 # ╠═627b5eac-9cd9-42f4-a7bf-6b7e5b09fd33
+# ╠═bc985d7d-0e31-4754-84a9-67f653248b7c
+# ╠═3e65077d-8c4e-4531-a6fa-d177fd7ed1ea
+# ╟─06a3eb82-0ffd-4c89-8161-d0f385c2a32e
+# ╠═939c6e86-ded8-4b15-890b-80207e8d692a
+# ╟─5a5f26dd-f0df-4dc7-be26-6bb23cc27fb2
+# ╠═09661381-baec-4e1a-8f4f-dac7aeb4ea3c
+# ╟─70ff0b9b-3aa2-4f3f-ab1b-b0a7072e7ffd
+# ╠═a854b9e6-1a82-401e-90d5-f05ffaadae61
+# ╠═2d116910-eb94-49b0-9e51-03fc9e57aebb
+# ╠═2f7147f0-6b4a-4364-8aab-07f8e150b720
+# ╠═4568aa57-7440-41a0-9eba-4050ce778ebd
 # ╟─8e13e697-e29a-473a-ac11-30e0199be5bb
 # ╟─649be363-e5dd-4c76-ae82-83e28e62b4f9
 # ╟─c4158166-b5ed-46aa-93c5-e95c77c57c6c
@@ -1314,8 +1506,14 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╟─1657bdf9-870c-4b7b-a5c4-57b53a3e1b13
 # ╟─f0c68f85-a55d-4823-a699-ce064af29ff4
 # ╟─6233ed1e-af35-47c6-8645-3906377b029c
-# ╠═8ac00844-24e5-416d-aa31-28242e4ee6a3
+# ╟─8ac00844-24e5-416d-aa31-28242e4ee6a3
 # ╟─b9368cf7-cbcd-4b54-9390-78e8c88f064c
+# ╟─541742f3-df63-4790-b7e0-82c8a78df8c3
+# ╟─cd08bb7e-afc4-4105-ad6a-5444893d7196
+# ╟─d7fae064-38e1-4b54-81d8-3803dce5ef5a
+# ╟─5d7d93a7-db41-4fa0-b043-9689996bc6af
+# ╟─cba01f4e-6628-49cb-a41b-743cc6e89b37
+# ╟─26f26b5d-7352-421c-a20b-9ec37dfe3eb6
 # ╟─cb47c8c9-2872-4e35-9939-f953319e1acb
 # ╟─6a84cdd0-f57e-4535-bc16-24bc40018033
 # ╟─a0534c86-5cd6-456a-93a6-19292b5879d6
@@ -1351,9 +1549,6 @@ Like in TypeScript, the `Promise{T}` can specify its **resolve type**. For examp
 # ╠═788a27b3-aab0-42cc-8197-3cc5b3b875d1
 # ╠═836bf28f-caa5-44e0-ac8c-44a722a9063b
 # ╠═371cede0-6f01-496a-8059-e110dbfc8d05
-# ╟─06a3eb82-0ffd-4c89-8161-d0f385c2a32e
-# ╠═939c6e86-ded8-4b15-890b-80207e8d692a
-# ╠═a854b9e6-1a82-401e-90d5-f05ffaadae61
 # ╟─eb4e90d9-0e21-4f06-842d-4260f074f097
 # ╟─a5b9e007-0282-4eb6-88dd-34855fe42fa4
 # ╟─3388a6bf-7718-485f-83eb-5c2bab93d283
