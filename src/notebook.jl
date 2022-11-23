@@ -1419,7 +1419,7 @@ $(br)
 Remember that a promise can finish in two ways: it can **✓ resolve** or it can **✗ reject**. When creating a Promise by hand, this corresponds to the two functions passed in by the constructor, `resolve` and `reject`:
 
 ```julia
-Promise{T=Any}(resolve, reject) -> begin
+Promise{T=Any}((resolve, reject) -> begin
 
 	if condition
 		# Resolve the promise:
