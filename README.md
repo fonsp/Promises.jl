@@ -98,20 +98,7 @@ bad_result = download_result.then(d -> sqrt(-1))
 Promise{Any}( <rejected>: 
 DomainError with -1.0:
 sqrt will only return a complex result if called with a complex argument. Try sqrt(Complex(x)).
-Stacktrace:
- [1] throw_complex_domainerror(f::Symbol, x::Float64)
-   @ Base.Math ./math.jl:33
- [2] sqrt
-   @ ./math.jl:567 [inlined]
- [3] sqrt(x::Int64)
-   @ Base.Math ./math.jl:1221
- [4] (::Main.var"#5#6"{typeof(sqrt)})(d::String)
-   @ Main ~/Documents/Promises.jl/src/notebook.jl#==#34364f4d-e257-4c22-84ee-d8786a2c377c:1
- [5] promise_then(p::Promise{Any}, f::Main.var"#5#6"{typeof(sqrt)})
-   @ Main.workspace#3 ~/Documents/Promises.jl/src/notebook.jl#==#49a8beb7-6a97-4c46-872e-e89822108f39:63
- [6] #18
-   @ ~/Documents/Promises.jl/src/notebook.jl#==#49a8beb7-6a97-4c46-872e-e89822108f39:175 [inlined]
- )
+)
 ```
 
 If you `@await` a Promise that has rejected, the rejected value will be rethrown as an error:
@@ -120,22 +107,10 @@ If you `@await` a Promise that has rejected, the rejected value will be rethrown
 ```julia
 @await bad_result
 
-#=>  
+#=⛔️ 
 DomainError with -1.0:
 sqrt will only return a complex result if called with a complex argument. Try sqrt(Complex(x)).
-Stacktrace:
- [1] throw_complex_domainerror(f::Symbol, x::Float64)
-   @ Base.Math ./math.jl:33
- [2] sqrt
-   @ ./math.jl:567 [inlined]
- [3] sqrt(x::Int64)
-   @ Base.Math ./math.jl:1221
- [4] (::var"#5#6"{typeof(sqrt)})(d::String)
-   @ Main ~/Documents/Promises.jl/src/notebook.jl#==#34364f4d-e257-4c22-84ee-d8786a2c377c:1
- [5] promise_then(p::Main.workspace#3.Promise{Any}, f::var"#5#6"{typeof(sqrt)})
-   @ Main.workspace#3 ~/Documents/Promises.jl/src/notebook.jl#==#49a8beb7-6a97-4c46-872e-e89822108f39:63
- [6] #18
-   @ ~/Documents/Promises.jl/src/notebook.jl#==#49a8beb7-6a97-4c46-872e-e89822108f39:175 [inlined]
+
 Stacktrace:
  [1] fetch(p::Main.workspace#3.Promise{Any})
    @ Main.workspace#3 ~/Documents/Promises.jl/src/notebook.jl#==#49a8beb7-6a97-4c46-872e-e89822108f39:112
@@ -149,7 +124,7 @@ Stacktrace:
 Remember that a promise can finish in two ways: it can **✓ resolve** or it can **✗ reject**. When creating a Promise by hand, this corresponds to the two functions passed in by the constructor, `resolve` and `reject`:
 
 ```julia
-Promise{T=Any}(resolve, reject) -> begin
+Promise{T=Any}((resolve, reject) -> begin
 
 	if condition
 		# Resolve the promise:

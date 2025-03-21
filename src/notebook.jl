@@ -37,6 +37,8 @@ begin
 		Pkg.instantiate()
 
 		# development dependencies
+		using Revise
+		
 		import Downloads
 		import JSON
 		using BenchmarkTools

@@ -196,8 +196,9 @@ function cell_md_data(cell::Pluto.Cell)::String
 			if mime isa MIME"text/markdown" || mime isa MIME"text/html"
 				"```julia\n$(cell.code)\n```\n$(data)"
 			else
+				arrow = cell.errored ? "#=⛔️" : "#=>"
 				multiline = occursin("\n", data)
-				"```julia\n$(cell.code)\n\n#=>  $(multiline ? "\n" : "")$(data)\n```"
+				"```julia\n$(cell.code)\n\n$(arrow)  $(multiline ? "\n" : "")$(data)\n```"
 			end
 		end
 	end
